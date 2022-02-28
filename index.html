@@ -2,9 +2,26 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Making your first Phaser 3 Game - Part 3</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, shrink-to-fit=no"
+    />
+
+    <!-- Bootstrap CSS -->
+    <link
+      rel="stylesheet"
+      href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
+      integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T"
+      crossorigin="anonymous"
+    />
+
+    <title>COVID SIM</title>
     <script src="//cdn.jsdelivr.net/npm/phaser@3.51.0/dist/phaser.js"></script>
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <!--chart-->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.4/Chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="chartjs-plugin-zoom.min.js"></script>
 
     <style type="text/css">
       body {
@@ -15,47 +32,87 @@
       }
     </style>
   </head>
-  <body>
-    <div id="phaser-example"></div>
-    <div class="controller">
-      <form id="target">
-        <label for="speed">Speed: </label>
-        <input
-          id="speed"
-          type="range"
-          min="1"
-          max="1000"
-          value="200"
-          placeholder="200"
-        /><br />
-        <label for="number">Number of Agents:</label>
-        <input
-          id="number"
-          type="number"
-          min="1"
-          max="1000"
-          value="30"
-          placeholder="30"
-        /><br />
-        <label for="probSmall"
-          >Probability of Infection(Direct interaction) [per frame]:</label
-        >
-        <input
-          id="probSmall"
-          type="text"
-          value="0.05"
-          placeholder="0.05"
-        /><br />
-        <label for="probBig"
-          >Probability of Infection(Within the area of influence) [per
-          frame]</label
-        >
-        <input id="probBig" type="text" value="0.01" placeholder="0.01" /><br />
 
-        <input type="submit" value="Submit" />
-      </form>
-      <button id="infectOne">Infect 1</button>
+  <body>
+    <div class="row">
+      <div class="controller col-3">
+        <form id="target">
+          <div class="form-group disable-on-start">
+            <label for="number">Number of Agents:</label>
+            <input
+              class="form-control form-control-sm"
+              id="number"
+              type="number"
+              min="1"
+              max="100"
+              value="60"
+              placeholder="30"
+            />
+          </div>
+          <h1>Policies</h1>
+          <div class="form-check">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              value=""
+              id="policy-mask"
+            />
+            <label class="form-check-label" for="policy-mask">
+              Wearing Masks
+            </label>
+          </div>
+          <div class="form-check">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              value=""
+              id="policy-lockdown"
+            />
+            <label class="form-check-label" for="policy-lockdown">
+              Lockdown / Social Distance
+            </label>
+          </div>
+          <div class="form-check">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              value=""
+              id="policy-vaccine"
+            />
+            <label class="form-check-label" for="policy-vaccine">
+              Vaccination
+            </label>
+          </div>
+          <div class="form-check">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              value=""
+              checked="true"
+              id="policy-immune"
+              disabled
+            />
+            <label class="form-check-label" for="policy-immune">
+              Immune after curing
+            </label>
+          </div>
+
+          <br />
+          <input
+            type="submit"
+            class="btn btn-primary disable-on-start"
+            value="Start Simulation"
+          />
+        </form>
+
+        <button id="infectOne" style="display: none" class="btn btn-warning">
+          Infect 1
+        </button>
+      </div>
+      <div id="phaser-example" class="col-5"></div>
     </div>
+    <br />
+    <canvas id="myChart" style="width: 100%; max-width: 700px"></canvas>
 
     <script type="text/javascript">
       var config = {
@@ -84,27 +141,152 @@
       var agentsBounds;
       var agentContainers = [];
 
-      var speed = 300;
-      var numberOfAgents = 30;
-      var probSmall = 0.05;
-      var probBig = 0.01;
+      var simCfg = {
+        speed: 200,
+        numberOfAgents: 50,
+        totalInfected: 0,
+        susceptible: 50,
+        cured: 0,
+        prob: {
+          small: 0.2,
+          big: 0.1,
+          cure: 0.005,
+        },
+        policy: {
+          mask: false,
+          lockdown: false,
+          vaccination: false,
+          curedImmune: false,
+        },
+      };
 
       var cursors;
 
       var red = 0xff0000;
       var green = 0x00ff00;
+      var blue = 0x0000ff;
+      //chart SETUP
+      var xValues = [0];
+      var yValues = [0];
 
+      const chartConfig = {
+        type: "line",
+        data: {
+          labels: xValues,
+          datasets: [
+            {
+              label: "Infected",
+              backgroundColor: "rgba(255,0,0,1.0)",
+              borderColor: "rgba(255,0,0,0.1)",
+              data: [0],
+            },
+            {
+              label: "Non-Infected",
+              backgroundColor: "rgba(0,255,0,1.0)",
+              borderColor: "rgba(0,255,0,0.1)",
+              data: [0],
+            },
+            {
+              label: "Cured",
+              backgroundColor: "rgba(0,0,255,1.0)",
+              borderColor: "rgba(0,0,255,0.1)",
+              data: [0],
+            },
+          ],
+        },
+        options: {
+          scales: {
+            yAxes: [{ ticks: { min: 0 } }],
+          },
+        },
+      };
+
+      var chart = new Chart("myChart", chartConfig);
+
+      var intervalIndex = 0;
+
+      const startChart = () => {
+        setInterval(function () {
+          intervalIndex++;
+          console.log("chart update", simCfg.totalInfected);
+          chart.data.labels.push(intervalIndex);
+
+          let nonInfectedData = chart.data.datasets[1].data;
+          let infectedData = chart.data.datasets[0].data;
+          let curedData = chart.data.datasets[2].data;
+          nonInfectedData.push(simCfg.susceptible);
+          infectedData.push(simCfg.totalInfected);
+          curedData.push(simCfg.cured);
+          chart.update();
+        }, 1000);
+      };
+      /*event listeners*/
+      $("#target").change((e) => {
+        let checked = e.target.checked;
+        switch (e.target.id) {
+          case "policy-mask":
+            simCfg.policy.mask = checked;
+            if (checked) {
+              simCfg.prob.small -= 0.05;
+              simCfg.prob.big -= 0.03;
+            } else {
+              simCfg.prob.small += 0.05;
+              simCfg.prob.big += 0.03;
+            }
+            break;
+          case "policy-lockdown":
+            simCfg.policy.lockdown = checked;
+            if (checked) {
+              simCfg.prob.small -= 0.1;
+              simCfg.prob.big -= 0.05;
+              simCfg.prob.cure += 0.005;
+            } else {
+              simCfg.prob.small += 0.1;
+              simCfg.prob.big += 0.05;
+              simCfg.prob.cure -= 0.005;
+            }
+            break;
+          case "policy-vaccine":
+            simCfg.policy.vaccination = checked;
+            if (checked) {
+              simCfg.prob.small -= 0.05;
+              simCfg.prob.big -= 0.01;
+              simCfg.prob.cure += 0.005;
+            } else {
+              simCfg.prob.small += 0.05;
+              simCfg.prob.big += 0.01;
+              simCfg.prob.cure -= 0.005;
+            }
+            break;
+          case "policy-immune":
+            simCfg.policy.curedImmune = checked;
+            break;
+          default:
+        }
+
+        console.log(e.target.id, simCfg.policy, simCfg.prob);
+      });
       $("#target").submit(function (e) {
         e.preventDefault();
         console.log(e);
-        speed = parseInt(e.target[0].value);
-        numberOfAgents = parseInt(e.target[1].value);
-        probSmall = parseFloat(e.target[2].value);
-        probBig = parseFloat(e.target[3].value);
+        simCfg.numberOfAgents = parseInt(e.target[0].value);
+        simCfg.susceptible = simCfg.numberOfAgents;
+        chartConfig.data.datasets[1].data = [simCfg.numberOfAgents];
+        //simCfg.policy.mask = e.target[1].checked;
+        //simCfg.policy.lockdown = e.target[2].checked;
+        //simCfg.policy.vaccination = e.target[3].checked;
+        simCfg.policy.curedImmune = e.target[4].checked;
+        //console.log(e.target.id, simCfg.policy); 
+
         if (first) {
           game = new Phaser.Game(config);
           first = !first;
         }
+
+        startChart();
+
+        $(".disable-on-start").css("display", "none");
+        $("#infectOne").css("display", "block");
       });
 
       function preload() {
@@ -129,7 +311,7 @@
       function create() {
         cursors = this.input.keyboard.createCursorKeys();
 
-        this.add.image(400, 300, "sky");
+        //this.add.image(400, 300, "sky");
 
         platforms = this.physics.add.staticGroup();
 
@@ -152,12 +334,15 @@
           var agent = agents.create(randX, randY, "star");
 
           var rand = Phaser.Math.FloatBetween(0, 6.28319);
-          agent.setVelocity(Math.sin(rand) * speed, Math.cos(rand) * speed);
+          agent.setVelocity(
+            Math.sin(rand) * simCfg.speed,
+            Math.cos(rand) * simCfg.speed
+          );
           agent.setBounce(1);
           agent.setCollideWorldBounds(true);
           agent.setTint(green);
           agent.name = "a" + index;
-          agent.setData({ isInfected: false });
+          agent.setData({ isInfected: false, isImmune: false });
 
           var agentBound = agentsBounds.create(randX, randY, "boundLarge");
           agentBound.name = "b" + index;
@@ -167,7 +352,7 @@
           agentContainers.push(container);
         }
 
-        for (i = 0; i < parseInt($("#number").val()); i++) {
+        for (i = 0; i < simCfg.numberOfAgents; i++) {
           createRandomAgent(i);
         }
         this.physics.add.overlap(agents, agents, agentInteract, null, this);
@@ -193,17 +378,36 @@
       function cure() {
         agents.children.iterate(function (child) {
           var randomNumber = Math.random();
-          if (randomNumber < 0.005) {
+          if (randomNumber < simCfg.prob.cure && child.getData("isInfected")) {
             child.setData("isInfected", false);
-            child.setTint(green);
+            child.setData("isImmune", true);
+            child.setTint(blue);
+            simCfg.totalInfected--;
+
+            simCfg.cured++;
           }
         });
+      }
+      function infect(agent) {
+        if (simCfg.policy.curedImmune) {
+          if (agent.getData("isImmune") === false) {
+            agent.setData("isInfected", true);
+            agent.setTint(red);
+            simCfg.totalInfected++;
+            simCfg.susceptible--;
+          }
+        } else {
+          agent.setData("isInfected", true);
+          agent.setTint(red);
+          simCfg.totalInfected++;
+          simCfg.susceptible--;
+        }
       }
       function agentBoundInteract(firstBound, secondBound) {
         var firstAgent = firstBound.parentContainer.list[0];
         var secondAgent = secondBound.parentContainer.list[0];
         var randomNumber = Math.random();
-        if (randomNumber < probBig) {
+        if (randomNumber < simCfg.prob.big) {
           if (
             firstAgent.getData("isInfected") &&
             secondAgent.getData("isInfected")
@@ -211,8 +415,7 @@
             //do nothing
           } else if (firstAgent.getData("isInfected")) {
             //infect second agent
-            secondAgent.setData("isInfected", true);
-            secondAgent.setTint(red);
+            infect(secondAgent);
           } /* else if (secondAgent.getData("isInfected")) {
           //infect first agent
           firstAgent.setData({ isInfected: true });
@@ -224,7 +427,7 @@
       function agentInteract(firstAgent, secondAgent) {
         var randomNumber = Math.random();
 
-        if (randomNumber < probSmall) {
+        if (randomNumber < simCfg.prob.small) {
           if (
             firstAgent.getData("isInfected") &&
             secondAgent.getData("isInfected")
@@ -232,8 +435,7 @@
             //do nothing
           } else if (firstAgent.getData("isInfected")) {
             //infect second agent
-            secondAgent.setData("isInfected", true);
-            secondAgent.setTint(red);
+            infect(secondAgent);
           } /* else if (secondAgent.getData("isInfected")) {
           //infect first agent
           firstAgent.setData({ isInfected: true });
@@ -243,10 +445,31 @@
       }
 
       $("#infectOne").click(function () {
-        agents.children.entries[0].setData({ isInfected: true });
-        agents.children.entries[0].setTint(red);
+        var r = Phaser.Math.Between(0, simCfg.numberOfAgents-1);
+          if (!agents.children.entries[r].getData("isInfected")) {
+            console.log(agents.children.entries[r].getData("isImmune"));
+            infect(agents.children.entries[r]);
+          }
+        
+
         //game.destroy();
       });
     </script>
+    <!-- jQuery first, then Popper.js, then Bootstrap JS -->
+    <script
+      src="https://code.jquery.com/jquery-3.3.1.slim.min.js"
+      integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"
+      integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"
+      integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM"
+      crossorigin="anonymous"
+    ></script>
   </body>
 </html>
